@@ -1,0 +1,19 @@
+{
+    "Network Settings" : {
+        "Mean Latency ms" : 1,
+        "Latency Standard Deviation" : 0,
+        "Packet Drop Rate %" : 0
+    },
+
+    "Protocol Settings" : {
+        "RTT ms" : 5,
+        "SSCT ms" : 5,
+        "SRCT ms" : 5,
+        "Window Size B" : 65536
+    },
+    
+    "Simulation Settings" : {
+        "Database Path" : "",
+        "Runtime s" : 10
+    }
+}
