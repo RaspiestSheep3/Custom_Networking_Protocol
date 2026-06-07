@@ -30,6 +30,8 @@ struct Packet {
 	uint8_t version; //0x00
 	uint8_t payload[1448];
 
+	bool isEmptyPacket; //This is used for packet loss
+
 	uint16_t CalculateChecksum(Packet targetPacket);
 };
 
@@ -69,6 +71,27 @@ uint16_t Packet::CalculateChecksum(Packet targetPacket) {
     return crc;
 }
 
+//Network functions
+void TransmitPacket(Packet& targetPacket) {
+	//Randomly generating the latency according to a normal distribution
+	random_device rd{};
+	mt19937 gen{ rd() };
+
+	std::normal_distribution<double> normalDistribution{meanLatencyMS, sdLatency};
+
+	auto randomLatency = [&normalDistribution, &gen] {return lround(normalDistribution(gen));  };
+	uint32_t latency = static_cast<uint32_t>(randomLatency());
+
+	//Wait for the latency time
+	this_thread::sleep_for(std::chrono::milliseconds(latency));
+
+	//Packet loss
+	uniform_real_distribution<double> uniformDistribution(0.0, 1.0);
+	auto randomPacketLoss = [&uniformDistribution, &gen] {return uniformDistribution(gen);  };
+	
+	if (randomPacketLoss() <= (packetDropRatePercentage / 100)) targetPacket.isEmptyPacket = true;
+}
+
 int main()
 {
 	//Loading in settings data
@@ -96,21 +119,17 @@ int main()
 	dbPath = settingsData["Simulation Settings"]["Database Path"];
 	runtimeS = settingsData["Simulation Settings"]["Runtime s"];
 
-
-
-
-
-	//Temporary stopping function
+	//Simulation timer
 	time_t now = time(NULL);
 	struct tm datetime = *localtime(&now);
-	datetime.tm_sec = datetime.tm_sec + 10;
+	datetime.tm_sec = datetime.tm_sec + runtimeS;
 	time_t end = mktime(&datetime);
 
-	while (difftime(end, now) > 2) {
-		RTTMS += 0;
-
+	while (difftime(end, now) > 0) {
 		now = time(NULL);
 		struct tm datetime = *localtime(&now);
+
+		//Network logic
 	}
 
 	return 0;
