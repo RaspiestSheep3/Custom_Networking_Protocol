@@ -95,17 +95,19 @@ void GenerateRandomBinary(uint8_t* buffer, uint32_t length, mt19937 &gen, unifor
 }
 
 //Network functions
-void TransmitPacket(Packet& targetPacket, mt19937 gen) {
+void TransmitPacket(Packet& targetPacket, mt19937 gen, bool runLatency = true) {
 	targetPacket.isEmptyPacket = false;
 
 	//Randomly generating the latency according to a normal distributiom
 	normal_distribution<double> normalDistribution{meanLatencyMS, sdLatency};
 
-	auto randomLatency = [&normalDistribution, &gen] {return lround(normalDistribution(gen));  };
-	uint32_t latency = static_cast<uint32_t>(randomLatency());
+	if (runLatency) {
+		auto randomLatency = [&normalDistribution, &gen] {return lround(normalDistribution(gen));  };
+		uint32_t latency = static_cast<uint32_t>(randomLatency());
 
-	//Wait for the latency time
-	this_thread::sleep_for(chrono::milliseconds(latency));
+		//Wait for the latency time
+		this_thread::sleep_for(chrono::milliseconds(latency));
+	}
 
 	//Packet loss
 	uniform_real_distribution<double> uniformDistribution(0.0, 1.0);
@@ -130,7 +132,7 @@ void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
 	uint32_t senderSequenceNumber = ((buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3]) & 0x7FFFFFF; //We have to set the first bit as 0
 	uint32_t receiverSequenceNumber = ((buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3]) | 0x80000000; //We have to set the first bit as 1
 
-
+	uint32_t numFileBytesLeft = fileSizeB;
 	//Step 1 - Initial Handshake
 	{
 
@@ -189,6 +191,11 @@ void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
 			static_cast<uint8_t>((finalSequenceNumber) & 0xFF),
 		};
 
+		//Mock packet data
+		GenerateRandomBinary(buffer, min(static_cast<uint32_t>(1444), numFileBytesLeft), gen, d);
+		numFileBytesLeft -= min(static_cast<uint32_t>(1444), numFileBytesLeft);
+		firstDataPacketPayload.insert(firstDataPacketPayload.end(), buffer, buffer + min(static_cast<uint32_t>(1444), numFileBytesLeft));
+
 		Packet firstDataPacket = Packet{
 			0x00,
 			0x00,
@@ -227,6 +234,94 @@ void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
 			TransmitPacket(SYN1Ack, gen);
 		}
 
+	}
+
+	//Data transfer
+	{
+		double windowSizePacketsCount = (windowSizeB / 1448);
+		int packetsPerMiniSet = ceil(min(windowSizePacketsCount, 361.0));
+	
+		while (numFileBytesLeft > 0) {
+			vector<uint32_t> failedPackets = {};
+			Packet dataPacket;
+
+			for (int i = 0; i < packetsPerMiniSet; i++) {
+				uint8_t flags = 0x00;
+				if (i = packetsPerMiniSet - 1) flags = 0x80; //END packet
+
+				GenerateRandomBinary(buffer, min(static_cast<uint32_t>(1448), numFileBytesLeft), gen, d);
+				vector<uint8_t> data(buffer, buffer + (sizeof(buffer) / sizeof(uint8_t)));
+				dataPacket = Packet{
+					0x00,
+					0x00,
+					senderSequenceNumber,
+					0x00,
+					flags,
+					0x00,
+					data,
+					false
+				};
+				dataPacket.CalculateChecksum();
+				senderSequenceNumber++;
+				numFileBytesLeft -= min(static_cast<uint32_t>(1448), numFileBytesLeft);
+
+				TransmitPacket(dataPacket, gen, flags != 0x00);
+				if (dataPacket.isEmptyPacket) failedPackets.push_back(dataPacket.sequenceNumber);
+			}
+
+			//If the END failed, we need to wait for the RTT before resending it
+			//DataPacket should be END at this point
+			while(dataPacket.isEmptyPacket) {
+				this_thread::sleep_for(chrono::milliseconds(RTTMS));
+				TransmitPacket(dataPacket, gen);
+			}
+
+			//Sending the RES packet back
+			while (failedPackets.size() > 0) {
+				vector<uint8_t> blank = {};
+				Packet resPacket = Packet{
+					0x00,
+					0x00,
+					receiverSequenceNumber,
+					0x00,
+					0x05,
+					0x00,
+					blank,
+					true
+				};
+				resPacket.CalculateChecksum();
+				receiverSequenceNumber++;
+
+				while (resPacket.isEmptyPacket) {
+					TransmitPacket(resPacket, gen);
+				}
+				
+				//We need to continue this loop until failedPackets is completely empty
+				int size = failedPackets.size();				
+				failedPackets.clear();
+				for (int j = 0; j < size; j++) {
+					uint8_t flags2 = 0x00;
+					if (j = size - 1) flags2 = 0x80; //END packet
+
+					GenerateRandomBinary(buffer, min(static_cast<uint32_t>(1448), numFileBytesLeft), gen, d);
+					vector<uint8_t> data(buffer, buffer + (sizeof(buffer) / sizeof(uint8_t)));
+					dataPacket = Packet{
+						0x00,
+						0x00,
+						senderSequenceNumber,
+						0x00,
+						flags2,
+						0x00,
+						data,
+						false
+					};
+					senderSequenceNumber++;
+
+					TransmitPacket(dataPacket, gen, flags2 != 0x00);
+					if (dataPacket.isEmptyPacket) failedPackets.push_back(dataPacket.sequenceNumber);
+				}
+			}
+		}
 	}
 
 	cout << "Run End" << endl;
