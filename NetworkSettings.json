@@ -2,7 +2,8 @@
     "Network Settings" : {
         "Mean Latency ms" : 1,
         "Latency Standard Deviation" : 0,
-        "Packet Drop Rate %" : 0
+        "Packet Drop Rate %" : 0,
+        "File Size B" : 0
     },
 
     "Protocol Settings" : {
