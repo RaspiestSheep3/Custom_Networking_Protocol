@@ -14,8 +14,8 @@ float packetDropRatePercentage;
 uint32_t fileSizeB;
 
 uint16_t RTTMS;
-float SSCTMS;
-float SRCTMS;
+uint16_t SSCTMS;
+uint16_t SRCTMS;
 uint32_t windowSizeB;
 
 string dbPath;
@@ -117,7 +117,7 @@ void TransmitPacket(Packet& targetPacket, mt19937 gen, bool runLatency = true) {
 }
 
 void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
-	cout << "Run Start" << endl;
+	//cout << "Run Start" << endl;
 
 	//Setup
 	uint8_t buffer[1448];
@@ -324,7 +324,69 @@ void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
 		}
 	}
 
-	cout << "Run End" << endl;
+	//Shutting the connection
+	{
+		Packet fin = Packet{
+			0x00,
+			0x00,
+			senderSequenceNumber,
+			0x00,
+			0x10,
+			0x00
+		};
+		fin.CalculateChecksum();
+		senderSequenceNumber++;
+
+		vector<uint8_t> finAckPayload = { 0x00 };
+		Packet finAck = Packet{
+			0x00,
+			0x00,
+			receiverSequenceNumber,
+			0x00,
+			0x12,
+			0x00,
+			finAckPayload
+		};
+		finAck.CalculateChecksum();
+		receiverSequenceNumber++;
+
+		Packet finEnd = Packet{
+			0x00,
+			0x00,
+			senderSequenceNumber,
+			0x00,
+			0x90,
+			0x00
+		};
+		finEnd.CalculateChecksum();
+		senderSequenceNumber++;
+
+		TransmitPacket(fin, gen);
+		if (!fin.isEmptyPacket) TransmitPacket(finAck, gen);
+		else {
+			while (fin.isEmptyPacket) {
+				//Wait for RTTMS, then resend packet
+				this_thread::sleep_for(chrono::milliseconds(RTTMS));
+				TransmitPacket(fin, gen);
+			}
+		}
+		if (!finAck.isEmptyPacket) TransmitPacket(finEnd, gen);
+
+		else {
+			while (finAck.isEmptyPacket) {
+				this_thread::sleep_for(chrono::milliseconds(SSCTMS));
+				return;
+			}
+		}
+
+		while (finEnd.isEmptyPacket) {
+			//As above
+			this_thread::sleep_for(chrono::milliseconds(SRCTMS));
+			return;
+		}
+	}
+
+	//cout << "Run End" << endl;
 }
 
 int main()
@@ -365,6 +427,7 @@ int main()
 	datetime.tm_sec = datetime.tm_sec + runtimeS;
 	time_t end = mktime(&datetime);
 
+	uint32_t count = 0;
 	while (difftime(end, now) > 0) {
 		now = time(NULL);
 		struct tm datetime = *localtime(&now);
@@ -374,7 +437,13 @@ int main()
 			gen,
 			uniformUInt32Distribution
 		);
+
+		count++;
 	}
+
+	count -= 1; //The last one will overflow the time limit, so we have to take away one to account for this
+
+	cout << "Count : " << count << endl;
 
 	return 0;
 }
