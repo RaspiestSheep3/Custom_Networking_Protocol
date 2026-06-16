@@ -19,7 +19,7 @@ uint16_t SRCTMS;
 uint32_t windowSizeB;
 
 string dbPath;
-float runtimeS;
+uint32_t iterations;
 
 //Packet declaration
 struct Packet {
@@ -95,7 +95,7 @@ void GenerateRandomBinary(uint8_t* buffer, uint32_t length, mt19937 &gen, unifor
 }
 
 //Network functions
-void TransmitPacket(Packet& targetPacket, mt19937 gen, bool runLatency = true) {
+void TransmitPacket(Packet& targetPacket, mt19937& gen, bool runLatency = true) {
 	targetPacket.isEmptyPacket = false;
 
 	//Randomly generating the latency according to a normal distributiom
@@ -231,7 +231,7 @@ void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
 		while (firstDataPacket.isEmptyPacket) {
 			//As above
 			this_thread::sleep_for(chrono::milliseconds(RTTMS));
-			TransmitPacket(SYN1Ack, gen);
+			TransmitPacket(firstDataPacket, gen);
 		}
 
 	}
@@ -247,7 +247,7 @@ void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
 
 			for (int i = 0; i < packetsPerMiniSet; i++) {
 				uint8_t flags = 0x00;
-				if (i = packetsPerMiniSet - 1) flags = 0x80; //END packet
+				if (i == packetsPerMiniSet - 1) flags = 0x80; //END packet
 
 				GenerateRandomBinary(buffer, min(static_cast<uint32_t>(1448), numFileBytesLeft), gen, d);
 				vector<uint8_t> data(buffer, buffer + (sizeof(buffer) / sizeof(uint8_t)));
@@ -301,7 +301,7 @@ void RunTransmission(mt19937& gen, uniform_int_distribution<uint32_t> d) {
 				failedPackets.clear();
 				for (int j = 0; j < size; j++) {
 					uint8_t flags2 = 0x00;
-					if (j = size - 1) flags2 = 0x80; //END packet
+					if (j == size - 1) flags2 = 0x80; //END packet
 
 					GenerateRandomBinary(buffer, min(static_cast<uint32_t>(1448), numFileBytesLeft), gen, d);
 					vector<uint8_t> data(buffer, buffer + (sizeof(buffer) / sizeof(uint8_t)));
@@ -415,35 +415,31 @@ int main()
 	windowSizeB = settingsData["Protocol Settings"]["Window Size B"];
 
 	dbPath = settingsData["Simulation Settings"]["Database Path"];
-	runtimeS = settingsData["Simulation Settings"]["Runtime s"];
+	iterations = settingsData["Simulation Settings"]["Iterations"];
 
 	//Randomness
 	random_device rd{};
 	mt19937 gen{ rd() };
 
 	//Simulation timer
-	time_t now = time(NULL);
-	struct tm datetime = *localtime(&now);
-	datetime.tm_sec = datetime.tm_sec + runtimeS;
-	time_t end = mktime(&datetime);
+	auto startTime = chrono::high_resolution_clock::now();
 
-	uint32_t count = 0;
-	while (difftime(end, now) > 0) {
-		now = time(NULL);
-		struct tm datetime = *localtime(&now);
-
+	for (int i = 0; i < iterations; i++) {
 		//Network logic
 		RunTransmission(
 			gen,
 			uniformUInt32Distribution
 		);
 
-		count++;
+		//cout << "Iteration " << i + 1 << " complete" << endl;
 	}
 
-	count -= 1; //The last one will overflow the time limit, so we have to take away one to account for this
+	auto endTime = chrono::high_resolution_clock::now();
+	chrono::duration<double> duration = endTime - startTime;
+	double totalTimeSeconds = duration.count();
 
-	cout << "Count : " << count << endl;
+	double bitsPerSecond = static_cast<double>(fileSizeB) * iterations * 8.0 / totalTimeSeconds;
 
+	cout << bitsPerSecond << endl;
 	return 0;
 }
