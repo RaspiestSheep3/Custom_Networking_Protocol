@@ -1,2 +1,17 @@
 .vs/
-out/
+venv/
+Lib/
+
+# 1. Ignore the top-level contents of out, but not the folder itself
+out/*
+
+# 2. Allow Git into 'build', but ignore everything else inside it
+!out/build/
+out/build/*
+
+# 3. Allow Git into 'x64-release', but ignore everything else inside it
+!out/build/x64-release/
+out/build/x64-release/*
+
+# 4. Whitelist your python files inside that specific release folder
+!out/build/x64-release/*.py
